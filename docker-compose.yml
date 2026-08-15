@@ -1,0 +1,48 @@
+version: "3.8"
+
+services:
+  db:
+    image: mariadb:10.11
+    container_name: webbook_db
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: quanlybanbooks
+    volumes:
+      - ./quanlybanbooks.sql:/docker-entrypoint-initdb.d/quanlybanbooks.sql
+    ports:
+      - "3306:3306"
+
+  web:
+    build: .
+    container_name: webbook_web
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./src:/var/www/html
+      - ./apache-logs:/var/log/apache2
+    depends_on:
+      - db
+
+  adminer:
+    image: adminer
+    container_name: webbook_adminer
+    ports:
+      - "8081:8080"
+    depends_on:
+      - db
+
+  fail2ban:
+    image: crazymax/fail2ban:latest
+    container_name: webbook_fail2ban
+    network_mode: "host"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./apache-logs:/var/log/apache2:ro
+      - ./fail2ban:/data
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      F2B_LOG_TARGET: STDOUT
+      F2B_LOG_LEVEL: INFO
