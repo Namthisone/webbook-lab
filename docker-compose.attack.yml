@@ -19,7 +19,9 @@ services:
       retries: 20
 
   web_attack:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.attack
     container_name: webbook_attack_web
     environment:
       DB_HOST: db_attack
@@ -30,7 +32,6 @@ services:
       WEBBOOK_INSTANCE: ATTACK
     ports:
       - "8081:80"
-      - "8444:443"
     volumes:
       - ./src:/var/www/html
       - ./apache-logs/attack:/var/log/apache2
