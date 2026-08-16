@@ -1,0 +1,6 @@
+<?php
+require_once '../db.php';
+header("Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'"); header('X-Frame-Options: DENY'); header('X-Content-Type-Options: nosniff');
+$id=(int)($_GET['id']??1); $st=$ket_noi->prepare('SELECT id,ten_sach,gia_ban FROM sach WHERE id=?'); $st->execute([$id]); $book=$st->fetch(PDO::FETCH_ASSOC);
+?><!doctype html><html lang="vi"><body style="font-family:Arial;max-width:900px;margin:30px auto"><h1>Secure Coding Reference</h1><h2>Prepared Statement</h2><pre>$stmt = $ket_noi-&gt;prepare('SELECT ... WHERE id = ?');
+$stmt-&gt;execute([$id]);</pre><h2>Output Encoding</h2><pre>echo htmlspecialchars($value, ENT_QUOTES, 'UTF-8');</pre><h2>Current safe query</h2><pre><?=htmlspecialchars(print_r($book,true))?></pre><h2>Checklist</h2><ul><li>PDO prepared statements</li><li>Context-aware output encoding</li><li>CSRF token cho POST/PUT/DELETE</li><li>Authorization server-side</li><li>Session regeneration</li><li>CSP + X-Frame-Options + nosniff</li><li>HTTPS + Secure/HttpOnly/SameSite cookies</li></ul><a href="index.php">← Lab menu</a></body></html>
