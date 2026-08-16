@@ -3,11 +3,27 @@ $instanceMode = strtolower(getenv('WEBBOOK_SECURITY_MODE') ?: 'attack');
 $instanceMode = in_array($instanceMode, ['attack','defense'], true) ? $instanceMode : 'attack';
 
 $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
-session_set_cookie_params(['httponly'=>true,'secure'=>$https,'samesite'=>'Lax']);
+
+// ATTACK is intentionally weak for the isolated lab. DEFENSE enables the
+// cookie flags required by the hardening exercise.
+if ($instanceMode === 'defense') {
+    session_set_cookie_params([
+        'httponly' => true,
+        'secure' => $https,
+        'samesite' => 'Lax'
+    ]);
+} else {
+    session_set_cookie_params([
+        'httponly' => false,
+        'secure' => false,
+        'samesite' => ''
+    ]);
+}
+
 if(session_status()!==PHP_SESSION_ACTIVE) session_start();
 require_once __DIR__.'/../db.php';
 
-// The deployment decides the security state. A URL parameter cannot turn a
+// Deployment decides the security state. A URL parameter cannot turn a
 // defense container back into vulnerable mode.
 function lab_mode(): string { global $instanceMode; return $instanceMode==='defense'?'fixed':'vulnerable'; }
 function lab_instance(): string { global $instanceMode; return $instanceMode==='defense'?'DEFENSE':'ATTACK'; }
