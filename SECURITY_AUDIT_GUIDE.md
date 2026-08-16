@@ -1,7 +1,6 @@
 # Đề 5 — Security Audit & Hardening Lab
 
 ## 1. Kiến trúc
-
 ```text
 Browser / Security Testing VM
           |
@@ -15,23 +14,39 @@ Browser / Security Testing VM
           |
       MariaDB 10.11
 
-Apache logs ---> Fail2ban ---> block abusive source
+Apache/PHP logs ---> Fail2ban ---> host firewall block
 ```
 
-## 2. Khởi động
-
+## 2. Khởi động sạch
 ```bash
 docker compose down -v
 docker compose up -d --build
 ```
+Mở `https://localhost:8443/security-lab/`. Chứng chỉ tự ký nên trình duyệt cảnh báo lần đầu.
 
-Mở `https://localhost:8443/security-lab/`. Chứng chỉ tự ký nên trình duyệt sẽ cảnh báo lần đầu.
+## 3. Before/After đúng yêu cầu đề
 
-## 3. Bộ kiểm thử
+**Before — application vulnerable + WAF DetectionOnly:**
+```bash
+./tools/waf-mode.sh off
+```
+Sau đó thực hiện từng scenario với `mode=vulnerable` và lưu screenshot Request/Response.
 
+**After — secure coding + WAF blocking:**
+```bash
+./tools/waf-mode.sh on
+```
+Thực hiện lại cùng scenario với `mode=fixed`, đồng thời thử request có dấu hiệu tấn công để chứng minh CRS block. Kiểm tra status và log thực tế.
+
+Kiểm tra trạng thái:
+```bash
+./tools/waf-mode.sh status
+```
+
+## 4. Bộ kiểm thử
 | ID | Scenario | Vulnerable | Hardened | Evidence |
 |---|---|---|---|---|
-| SQL-01 | Basic SQLi | `sqli.php?type=basic&mode=vulnerable` | `mode=fixed` | response + audit + WAF log |
+| SQL-01 | Basic SQLi | `sqli.php?type=basic&mode=vulnerable` | `mode=fixed` | response + audit + WAF |
 | SQL-02 | UNION-style | `type=union` | fixed | response + status |
 | SQL-03 | Error-based | `type=error` | fixed | error/status |
 | SQL-04 | Blind Boolean | `type=blind` | fixed | TRUE/FALSE |
@@ -39,71 +54,81 @@ Mở `https://localhost:8443/security-lab/`. Chứng chỉ tự ký nên trình 
 | XSS-01 | Reflected | `xss.php` | fixed | browser + response |
 | XSS-02 | Stored | `xss.php` POST | fixed | stored output |
 | XSS-03 | DOM | `xss-dom.php` | fixed | DOM sink |
-| CMD-01 | OS Command | `command.php` | fixed | command output/status |
+| CMD-01 | OS Command | `command.php` | fixed | output/status |
 | IDOR-01 | Object authorization | `idor.php` | fixed | 403/allowed |
 | CSRF-01 | State change | `csrf.php` | fixed | token rejection |
 | SES-01 | Session fixation | `session.php` | fixed | session ID change |
 
-> Payloads được thử nghiệm chỉ trong localhost/VM. Ghi đúng payload bạn dùng trong biên bản của nhóm, không thử trên hệ thống bên ngoài phạm vi được phép.
+> Chỉ thử payloads trên localhost/VM được phép. Trong báo cáo ghi chính xác request bạn đã thực hiện và kết quả thực tế.
 
-## 4. WAF verification
+## 5. ModSecurity / OWASP CRS
 
-ModSecurity chạy ở `SecRuleEngine On`. Khi gửi một request rõ ràng có dấu hiệu SQLi/XSS, kiểm tra:
+ModSecurity mặc định được build với `SecRuleEngine On` và audit log tại `/var/log/apache2/modsec_audit.log`.
 
 ```bash
-docker compose exec web sh -c 'grep -Ei "ModSecurity|Access denied|SQL Injection|XSS" /var/log/apache2/*'
+docker compose exec web sh -c 'grep -E "^SecRuleEngine|^SecAudit" /etc/modsecurity/modsecurity.conf'
+docker compose exec web sh -c 'tail -n 80 /var/log/apache2/modsec_audit.log'
 ```
 
-HTTP status thường cần ghi lại là `403` khi CRS chặn request. Không coi một payload cụ thể là bằng chứng duy nhất; dùng log thực tế làm bằng chứng.
+Khi CRS chặn request, ghi lại **HTTP 403 + rule ID/message trong audit log**. Không kết luận dựa trên một payload cố định; dùng log của chính môi trường lab.
 
-## 5. Fail2ban verification
+## 6. Fail2ban / brute-force
 
-Đăng nhập sai nhiều lần vào `/dang_nhap.php`, sau đó kiểm tra:
+Ứng dụng ghi `[WEBBOOK-LOGIN-FAIL]` vào Apache/PHP error log. Jail `webbook-login` dùng `maxretry=5`, `findtime=300`, `bantime=600`.
 
 ```bash
 docker compose logs fail2ban
-```
-
-và log Apache/PHP:
-
-```bash
 grep -R "WEBBOOK-LOGIN-FAIL" apache-logs/
 ```
 
-Ghi thời điểm, IP lab, số lần thất bại và trạng thái jail vào báo cáo.
+Trong video: nhập sai mật khẩu nhiều lần → log tăng → Fail2ban phát hiện → jail/block. Chỉ dùng IP của máy lab.
 
-## 6. Security headers
-
+## 7. Security headers / HTTPS
 ```bash
 curl -k -I https://localhost:8443/
 ```
+Kiểm tra: `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Strict-Transport-Security`, `Referrer-Policy`, `Permissions-Policy`.
 
-Cần kiểm tra tối thiểu:
+Cookie PHP: kiểm tra `Secure`, `HttpOnly`, `SameSite` trong DevTools.
 
-- `Content-Security-Policy`
-- `X-Frame-Options: DENY`
-- `X-Content-Type-Options: nosniff`
-- `Strict-Transport-Security`
-- `Referrer-Policy`
-- `Permissions-Policy`
+## 8. Audit evidence
 
-Cookie PHP cần kiểm tra `Secure`, `HttpOnly`, `SameSite` bằng DevTools → Application/Storage → Cookies.
+Mở `https://localhost:8443/security-lab/audit.php`.
 
-## 7. Audit evidence
+Bảng lưu: scenario, vulnerable/fixed mode, method, path, status code, result, notes. Đây là nguồn để chụp ảnh phần Verification. Script tổng hợp:
 
-Mở:
+```bash
+bash tools/verify-security.sh
+```
 
-`https://localhost:8443/security-lab/audit.php`
+## 9. Sơ đồ báo cáo
 
-Trang này lưu scenario, vulnerable/fixed mode, HTTP method/path, status code, kết quả và ghi chú. Chụp màn hình bảng này cho phần Verification của báo cáo.
+```text
+Internet/Client (lab)
+        |
+     HTTPS/TLS
+        |
+ [Apache Web Server]
+        |
+ [ModSecurity + CRS]
+        |
+ [PHP Secure Coding]
+   /         |        \
+ SQLi      XSS       Auth/CSRF/IDOR
+        |
+     [PDO]
+        |
+    [MariaDB]
+        |
+ Apache/PHP Logs --> Fail2ban
+```
 
-## 8. Cấu trúc báo cáo
-
-1. Giới thiệu và phạm vi kiểm toán
+## 10. Cấu trúc báo cáo
+1. Giới thiệu/phạm vi
 2. Môi trường Ubuntu/Docker/Apache/PHP/MariaDB
-3. Sơ đồ kiến trúc bảo mật
-4. Threat model và OWASP Top 10 liên quan
-5. Pentest trước hardening
+3. Sơ đồ kiến trúc
+4. Threat model
+5. Pentest Before
 6. SQL Injection 5 kịch bản
 7. XSS 3 kịch bản
 8. OS Command Injection
@@ -115,18 +140,17 @@ Trang này lưu scenario, vulnerable/fixed mode, HTTP method/path, status code, 
 14. Security Headers
 15. ModSecurity + OWASP CRS
 16. Fail2ban + log monitoring
-17. Verification sau hardening
-18. So sánh Before/After
+17. Verification After
+18. Before/After comparison
 19. Kết luận
-20. Phụ lục request/response, log và ảnh/video
+20. Phụ lục Request/Response, log, screenshot, video
 
-## 9. Bảng Before/After mẫu
-
-| Test | Before | After | HTTP | WAF/Log |
+## 11. Bảng Before/After
+| Test | Before | After | HTTP | Evidence |
 |---|---|---|---|---|
-| SQLi | khai thác được trong vulnerable lab | prepared statement / WAF block | 403 hoặc safe response | CRS alert |
-| XSS | script được phản ánh/lưu trong vulnerable lab | encoded | safe response | CRS nếu rule match |
-| Command | shell nhận input | allowlist + escaping | blocked/safe | Apache log |
-| IDOR | xem object khác | authorization check | 403 | audit |
-| CSRF | state thay đổi | thiếu token bị từ chối | 403 | audit |
-| Session | ID giữ nguyên | regenerate sau login | 200 | audit |
+| SQLi | vulnerable app có thể bị tác động | prepared statement / WAF | 403 hoặc safe | audit + CRS |
+| XSS | raw output | encoded output | safe | browser + audit |
+| Command | shell nhận input | allowlist/escaping | blocked/safe | log |
+| IDOR | object khác có thể đọc | authorization | 403 | audit |
+| CSRF | state đổi không token | token bắt buộc | 403 | audit |
+| Session | ID giữ nguyên | regenerate | 200 | session evidence |
