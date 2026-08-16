@@ -1,0 +1,6 @@
+<?php
+require_once '../db.php';
+session_start();
+$mode=$_GET['mode']??'vulnerable'; $msg=$_GET['msg']??'';
+if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['comment'])){ $comment=$_POST['comment']; $st=$ket_noi->prepare('INSERT INTO khieu_nai(noi_dung) VALUES (?)'); try{$st->execute([$comment]);}catch(Throwable $e){$_SESSION['xss_msg']=$comment;} header('Location:xss.php?mode='.$mode); exit; }
+?><!doctype html><html lang="vi"><head><meta charset="utf-8"><title>XSS Lab</title></head><body style="font-family:Arial;max-width:900px;margin:30px auto"><h1>XSS Lab</h1><h2>Reflected</h2><form><input name="msg" value="<?=htmlspecialchars($msg,ENT_QUOTES,'UTF-8')?>"><select name="mode"><option>vulnerable</option><option>fixed</option></select><button>Test</button></form><div style="padding:12px;border:1px solid #ccc;margin-top:10px"><?php if($mode==='vulnerable') echo $msg; else echo htmlspecialchars($msg,ENT_QUOTES,'UTF-8'); ?></div><h2>Stored</h2><form method="post"><textarea name="comment" rows="4" cols="70" placeholder="Lab comment"></textarea><br><button>Save</button></form><p><b>Fixed principle:</b> encode output according to HTML context; validate input; add CSP.</p><p><a href="index.php">← Lab menu</a></p></body></html>
