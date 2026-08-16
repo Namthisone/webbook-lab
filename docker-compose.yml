@@ -1,20 +1,31 @@
-version: "3.8"
-
 services:
   db:
     image: mariadb:10.11
     container_name: webbook_db
     environment:
-      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
       MYSQL_DATABASE: quanlybanbooks
+      MYSQL_USER: webbook_app
+      MYSQL_PASSWORD: webbook_lab_password
+      MYSQL_ROOT_PASSWORD: webbook_lab_root
     volumes:
-      - ./quanlybanbooks.sql:/docker-entrypoint-initdb.d/quanlybanbooks.sql
+      - db_data:/var/lib/mysql
+      - ./quanlybanbooks.sql:/docker-entrypoint-initdb.d/01-quanlybanbooks.sql:ro
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h localhost -uwebbook_app -pwebbook_lab_password --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   web:
     build: .
     container_name: webbook_web
+    environment:
+      DB_HOST: db
+      DB_USER: webbook_app
+      DB_PASSWORD: webbook_lab_password
+      DB_NAME: quanlybanbooks
     ports:
       - "8080:80"
       - "8443:443"
@@ -22,15 +33,17 @@ services:
       - ./src:/var/www/html
       - ./apache-logs:/var/log/apache2
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   adminer:
     image: adminer
     container_name: webbook_adminer
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   fail2ban:
     image: crazymax/fail2ban:latest
@@ -46,3 +59,6 @@ services:
       TZ: Asia/Ho_Chi_Minh
       F2B_LOG_TARGET: STDOUT
       F2B_LOG_LEVEL: INFO
+
+volumes:
+  db_data:
