@@ -1,0 +1,42 @@
+services:
+  db_defense:
+    image: mariadb:10.11
+    container_name: webbook_defense_db
+    environment:
+      MYSQL_DATABASE: quanlybanbooks
+      MYSQL_USER: webbook_defense
+      MYSQL_PASSWORD: webbook_defense_password
+      MYSQL_ROOT_PASSWORD: webbook_defense_root
+    volumes:
+      - db_defense_data:/var/lib/mysql
+      - ./quanlybanbooks.sql:/docker-entrypoint-initdb.d/01-quanlybanbooks.sql:ro
+    ports:
+      - "127.0.0.1:3308:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h localhost -uwebbook_defense -pwebbook_defense_password --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web_defense:
+    build: .
+    container_name: webbook_defense_web
+    environment:
+      DB_HOST: db_defense
+      DB_USER: webbook_defense
+      DB_PASSWORD: webbook_defense_password
+      DB_NAME: quanlybanbooks
+      WEBBOOK_SECURITY_MODE: defense
+      WEBBOOK_INSTANCE: DEFENSE
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./src:/var/www/html
+      - ./apache-logs/defense:/var/log/apache2
+    depends_on:
+      db_defense:
+        condition: service_healthy
+
+volumes:
+  db_defense_data:
