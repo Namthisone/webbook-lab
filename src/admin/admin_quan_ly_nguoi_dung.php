@@ -1,254 +1,91 @@
 <?php
 session_start();
-require_once '../db.php'; // Kết nối cơ sở dữ liệu
+require_once '../db.php';
 
-$thong_bao = "";
-
-// --- XỬ LÝ 1: XÓA NGƯỜI DÙNG ---
-if (isset($_GET['xoa'])) {
-    $id_xoa = intval($_GET['xoa']);
-    
-    // Ngăn chặn admin tự xóa chính mình bằng cách check ID trong Session
-    if (isset($_SESSION['user_id']) && $_SESSION['user_id'] == $id_xoa) {
-        $thong_bao = "<div class='alert alert-danger'>❌ Bạn không thể tự xóa tài khoản của chính mình!</div>";
-    } else {
-        try {
-            $stmt_xoa = $ket_noi->prepare("DELETE FROM nguoi_dung WHERE id = ?");
-            $stmt_xoa->execute([$id_xoa]);
-            $_SESSION['msg'] = "<div class='alert alert-success'>✅ Đã xóa người dùng thành công!</div>";
-            header("Location: admin_quan_ly_nguoi_dung.php");
-            exit;
-        } catch (Exception $e) {
-            $thong_bao = "<div class='alert alert-danger'>❌ Không thể xóa (Người dùng này có thể đã có lịch sử đơn hàng): " . $e->getMessage() . "</div>";
-        }
-    }
+if (!isset($_SESSION['user']['id']) || ($_SESSION['user']['vai_tro'] ?? '') !== 'admin') {
+    header('Location: ../dang_nhap.php');
+    exit;
 }
 
-// --- XỬ LÝ 2: THÊM HOẶC CẬP NHẬT TÀI KHOẢN ---
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['luu_nguoi_dung'])) {
-    $id = isset($_POST['id']) ? intval($_POST['id']) : 0;
-    $ho_ten = trim($_POST['ho_ten']);
-    $email = trim($_POST['email']);
-    $so_dien_thoai = trim($_POST['so_dien_thoai']);
-    $vai_tro = trim($_POST['vai_tro'] ?? 'khach_hang');
-    $mat_khau_moi = trim($_POST['mat_khau']);
+if (empty($_SESSION['admin_csrf'])) {
+    $_SESSION['admin_csrf'] = bin2hex(random_bytes(32));
+}
 
-    if (empty($ho_ten) || empty($email)) {
-        $thong_bao = "<div class='alert alert-danger'>❌ Họ tên và Email không được để trống!</div>";
+$thong_bao = '';
+$csrf = $_SESSION['admin_csrf'];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!hash_equals($csrf, $_POST['csrf_token'] ?? '')) {
+        http_response_code(403);
+        $thong_bao = 'CSRF token không hợp lệ.';
     } else {
+        $action = $_POST['action'] ?? '';
         try {
-            if ($id > 0) {
-                // CẬP NHẬT TÀI KHOẢN
-                if (!empty($mat_khau_moi)) {
-                    // Nếu admin có nhập mật khẩu mới -> đổi luôn mật khẩu (nên mã hóa md5 hoặc password_hash tùy dự án của bạn)
-                    $sql = "UPDATE nguoi_dung SET ho_ten = ?, email = ?, so_dien_thoai = ?, vai_tro = ?, mat_khau = ? WHERE id = ?";
-                    $stmt = $ket_noi->prepare($sql);
-                    $stmt->execute([$ho_ten, $email, $so_dien_thoai, $vai_tro, $mat_khau_moi, $id]);
-                } else {
-                    // Không nhập mật khẩu mới -> giữ nguyên mật khẩu cũ
-                    $sql = "UPDATE nguoi_dung SET ho_ten = ?, email = ?, so_dien_thoai = ?, vai_tro = ? WHERE id = ?";
-                    $stmt = $ket_noi->prepare($sql);
-                    $stmt->execute([$ho_ten, $email, $so_dien_thoai, $vai_tro, $id]);
+            if ($action === 'delete') {
+                $id = (int)($_POST['id'] ?? 0);
+                if ($id <= 0 || $id === (int)$_SESSION['user']['id']) {
+                    throw new RuntimeException('Không thể xóa tài khoản hiện tại hoặc ID không hợp lệ.');
                 }
-                $thong_bao = "<div class='alert alert-success'>✅ Cập nhật thông tin tài khoản thành công!</div>";
-            } else {
-                // THÊM TÀI KHOẢN MỚI
-                if (empty($mat_khau_moi)) { $mat_khau_moi = '123456'; } // Mật khẩu mặc định nếu trống
-                $sql = "INSERT INTO nguoi_dung (ho_ten, email, so_dien_thoai, vai_tro, mat_khau) VALUES (?, ?, ?, ?, ?)";
-                $stmt = $ket_noi->prepare($sql);
-                $stmt->execute([$ho_ten, $email, $so_dien_thoai, $vai_tro, $mat_khau_moi]);
-                $thong_bao = "<div class='alert alert-success'>✅ Đã tạo tài khoản thành viên mới thành công!</div>";
+                $s = $ket_noi->prepare('DELETE FROM nguoi_dung WHERE id=?');
+                $s->execute([$id]);
+                $thong_bao = 'Đã xóa người dùng.';
+            } elseif ($action === 'save') {
+                $id = (int)($_POST['id'] ?? 0);
+                $ho_ten = trim($_POST['ho_ten'] ?? '');
+                $email = trim($_POST['email'] ?? '');
+                $phone = trim($_POST['so_dien_thoai'] ?? '');
+                $role = ($_POST['vai_tro'] ?? 'khach_hang') === 'admin' ? 'admin' : 'khach_hang';
+                $password = $_POST['mat_khau'] ?? '';
+
+                if ($ho_ten === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    throw new RuntimeException('Họ tên và email hợp lệ là bắt buộc.');
+                }
+
+                if ($id > 0) {
+                    if ($password !== '') {
+                        if (strlen($password) < 8) throw new RuntimeException('Mật khẩu mới phải có ít nhất 8 ký tự.');
+                        $hash = password_hash($password, PASSWORD_DEFAULT);
+                        $s = $ket_noi->prepare('UPDATE nguoi_dung SET ho_ten=?, email=?, so_dien_thoai=?, vai_tro=?, mat_khau=? WHERE id=?');
+                        $s->execute([$ho_ten,$email,$phone,$role,$hash,$id]);
+                    } else {
+                        $s = $ket_noi->prepare('UPDATE nguoi_dung SET ho_ten=?, email=?, so_dien_thoai=?, vai_tro=? WHERE id=?');
+                        $s->execute([$ho_ten,$email,$phone,$role,$id]);
+                    }
+                    $thong_bao = 'Đã cập nhật tài khoản.';
+                } else {
+                    if (strlen($password) < 8) throw new RuntimeException('Mật khẩu mới phải có ít nhất 8 ký tự.');
+                    $s = $ket_noi->prepare('INSERT INTO nguoi_dung(ten_dang_nhap,mat_khau,ho_ten,email,so_dien_thoai,vai_tro) VALUES(?,?,?,?,?,?)');
+                    $username = trim($_POST['ten_dang_nhap'] ?? '');
+                    if (!preg_match('/^[A-Za-z0-9_.-]{3,80}$/', $username)) throw new RuntimeException('Tên đăng nhập không hợp lệ.');
+                    $s->execute([$username,password_hash($password,PASSWORD_DEFAULT),$ho_ten,$email,$phone,$role]);
+                    $thong_bao = 'Đã tạo tài khoản.';
+                }
             }
-        } catch (Exception $e) {
-            $thong_bao = "<div class='alert alert-danger'>❌ Lỗi: Email bị trùng hoặc không hợp lệ: " . $e->getMessage() . "</div>";
+        } catch (Throwable $e) {
+            $thong_bao = 'Lỗi: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
         }
     }
 }
 
-// --- XỬ LÝ 3: LẤY DỮ LIỆU ĐỂ ĐỔ VÀO FORM SỬA ---
 $user_sua = null;
 if (isset($_GET['sua'])) {
-    $id_sua = intval($_GET['sua']);
-    $stmt_get = $ket_noi->prepare("SELECT * FROM nguoi_dung WHERE id = ?");
-    $stmt_get->execute([$id_sua]);
-    $user_sua = $stmt_get->fetch(PDO::FETCH_ASSOC);
+    $s = $ket_noi->prepare('SELECT id,ten_dang_nhap,ho_ten,email,so_dien_thoai,vai_tro FROM nguoi_dung WHERE id=?');
+    $s->execute([(int)$_GET['sua']]);
+    $user_sua = $s->fetch();
 }
-
-// --- XỬ LÝ 4: LẤY TOÀN BỘ DANH SÁCH THÀNH VIÊN ---
-$danh_sach_user = [];
-try {
-    $sql_all = "SELECT * FROM nguoi_dung ORDER BY id DESC";
-    $danh_sach_user = $ket_noi->query($sql_all)->fetchAll(PDO::FETCH_ASSOC);
-} catch (Exception $e) {
-    $thong_bao = "<div class='alert alert-danger'>❌ Không thể tải danh sách tài khoản: " . $e->getMessage() . "</div>";
-}
-
-if (isset($_SESSION['msg'])) {
-    $thong_bao = $_SESSION['msg'];
-    unset($_SESSION['msg']);
-}
+$danh_sach_user = $ket_noi->query('SELECT id,ten_dang_nhap,ho_ten,email,so_dien_thoai,vai_tro FROM nguoi_dung ORDER BY id DESC')->fetchAll();
 ?>
-
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <title>Admin - Quản Lý Thành Viên</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: #f4f6f9; display: flex; min-height: 100vh; }
-        
-        /* Sidebar Admin */
-        .sidebar { width: 260px; background-color: #2c3e50; color: white; padding: 20px 0; display: flex; flex-direction: column; flex-shrink: 0; }
-        .sidebar h3 { text-align: left; padding: 0 20px 20px 20px; margin-bottom: 20px; color: #e67e22; border-bottom: 1px solid #34495e; font-size: 16px; letter-spacing: 1px;}
-        .sidebar a { display: block; color: #bdc3c7; padding: 14px 20px; text-decoration: none; font-size: 14px; font-weight: bold; transition: all 0.2s; }
-        .sidebar a:hover, .sidebar a.active { background-color: #34495e; color: white; border-left: 4px solid #e67e22; padding-left: 16px; }
-
-        /* Vùng nội dung chính */
-        .main-content { flex: 1; padding: 30px; overflow-y: auto; }
-        h2 { color: #333; margin-bottom: 20px; font-size: 24px; display: flex; align-items: center; gap: 10px; }
-        
-        .grid-layout { display: flex; gap: 25px; flex-wrap: wrap; align-items: flex-start; }
-        .form-container { background: white; padding: 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); width: 360px; flex-shrink: 0; }
-        .table-container { background: white; padding: 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); flex: 1; min-width: 550px; }
-        
-        table { width: 100%; border-collapse: collapse; text-align: left; }
-        th, td { padding: 14px 12px; border-bottom: 1px solid #e2e8f0; font-size: 14px; vertical-align: middle; }
-        th { background-color: #f8f9fa; color: #4a5568; font-weight: bold; font-size: 13px; text-transform: uppercase; }
-        
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 6px; font-weight: bold; color: #4a5568; font-size: 13px; }
-        input[type="text"], input[type="password"], select { width: 100%; padding: 11px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 14px; background-color: #fff; }
-        input:focus, select:focus { border-color: #3182ce; outline: none; box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.15); }
-        
-        .btn { padding: 6px 12px; border-radius: 4px; border: none; cursor: pointer; text-decoration: none; font-size: 13px; font-weight: bold; display: inline-block; text-align: center; }
-        .btn-edit { background-color: #3182ce; color: white; margin-right: 5px; }
-        .btn-delete { background-color: #e53e3e; color: white; }
-        .btn-submit { background-color: #3182ce; color: white; width: 100%; padding: 12px; font-size: 14px; margin-top: 10px; border-radius: 4px; font-weight: bold; border: none; cursor: pointer; transition: background 0.2s;}
-        .btn-submit:hover { background-color: #2b6cb0; }
-        
-        .alert { padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 14px; font-weight: bold;}
-        .alert-success { background-color: #c6f6d5; color: #22543d; border: 1px solid #9ae6b4; }
-        .alert-danger { background-color: #fed7d7; color: #742a2a; border: 1px solid #feb2b2; }
-        
-        /* Badge phân quyền */
-        .badge-role { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; }
-        .role-admin { background-color: #fed7d7; color: #9b1c1c; border: 1px solid #fbb6b6; }
-        .role-user { background-color: #e2e8f0; color: #4a5568; }
-        .text-muted { color: #718096; font-size: 12px; }
-    </style>
-</head>
-<body>
-
-<div class="sidebar">
-    <h3>📊 ADMIN Tạp Hóa Sách</h3>
-    <a href="admin_don_hang_mua.php">📦 Quản lý Đơn Mua</a>
-    <a href="admin_don_hang_thue.php">📋 Quản lý Đơn Thuê</a>
-    <a href="admin_quan_ly_sach.php">📚 Quản lý Kho Sách</a>
-    <a href="admin_quan_ly_the_loai.php">📁 Quản lý Thể Loại</a>
-    <a href="admin_quan_ly_nguoi_dung.php" class="active">👥 Quản lý Người Dùng</a>
-    <a href="../admin/index.php">🏠 Về Trang Chủ User</a>
-</div>
-
-<div class="main-content">
-    <h2>👥 Quản Lý Tài Khoản Thành Viên & Ban Quản Trị</h2>
-    
-    <?php echo $thong_bao; ?>
-
-    <div class="grid-layout">
-        <div class="form-container">
-            <h3 style="color:#2d3748; margin-bottom: 18px; border-bottom: 2px solid #edf2f7; padding-bottom: 8px; font-size: 16px;">
-                <?php echo $user_sua ? "🔄 Sửa Tài Khoản ID #".$user_sua['id'] : "➕ Tạo Tài Khoản Mới"; ?>
-            </h3>
-            
-            <form action="admin_quan_ly_nguoi_dung.php" method="POST">
-                <input type="hidden" name="id" value="<?php echo $user_sua['id'] ?? 0; ?>">
-
-                <div class="form-group">
-                    <label>Họ và tên:</label>
-                    <input type="text" name="ho_ten" value="<?php echo htmlspecialchars($user_sua['ho_ten'] ?? ''); ?>" placeholder="Nhập đầy đủ họ tên..." required>
-                </div>
-
-                <div class="form-group">
-                    <label>Email tài khoản:</label>
-                    <input type="text" name="email" value="<?php echo htmlspecialchars($user_sua['email'] ?? ''); ?>" placeholder="Nhập địa chỉ email..." required>
-                </div>
-
-                <div class="form-group">
-                    <label>Số điện thoại:</label>
-                    <input type="text" name="so_dien_thoai" value="<?php echo htmlspecialchars($user_sua['so_dien_thoai'] ?? ''); ?>" placeholder="Nhập số điện thoại...">
-                </div>
-
-                <div class="form-group">
-                    <label>Phân quyền cấp bậc:</label>
-                    <select name="vai_tro" required>
-                        <option value="khach_hang" <?php if(isset($user_sua['vai_tro']) && $user_sua['vai_tro'] == 'khach_hang') echo 'selected'; ?>>🧑 Khách Hàng (Thành viên)</option>
-                        <option value="admin" <?php if(isset($user_sua['vai_tro']) && $user_sua['vai_tro'] == 'admin') echo 'selected'; ?>>🛡️ Ban Quản Trị (Admin)</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>Mật khẩu:</label>
-                    <input type="password" name="mat_khau" placeholder="<?php echo $user_sua ? 'Để trống nếu giữ nguyên mật khẩu cũ' : 'Nhập mật khẩu...'; ?>">
-                    <?php if($user_sua): ?>
-                        <span class="text-muted">Mật khẩu hiện tại đang được ẩn mật.</span>
-                    <?php endif; ?>
-                </div>
-
-                <button type="submit" name="luu_nguoi_dung" class="btn btn-submit">
-                    <?php echo $user_sua ? "💾 Lưu Thay Đổi" : "🚀 Cấp Tài Khoản"; ?>
-                </button>
-                
-                <?php if ($user_sua): ?>
-                    <a href="admin_quan_ly_nguoi_dung.php" style="display:block; text-align:center; margin-top:12px; color:#e53e3e; font-size:13px; text-decoration:none; font-weight:bold;">❌ Hủy sửa, quay lại thêm mới</a>
-                <?php endif; ?>
-            </form>
-        </div>
-
-        <div class="table-container">
-            <h3 style="color:#2d3748; margin-bottom: 15px; font-size: 16px;">📂 Danh Sách Tài Khoản (<?php echo count($danh_sach_user); ?>)</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 60px;">Mã</th>
-                        <th>Thông Tin Thành Viên</th>
-                        <th>Phân Quyền</th>
-                        <th style="width: 120px; text-align: right;">Hành Động</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (count($danh_sach_user) == 0): ?>
-                        <tr>
-                            <td colspan="4" style="text-align: center; color:#a0aec0; padding: 20px;">Hệ thống chưa có người dùng nào đăng ký.</td>
-                        </tr>
-                    <?php else: ?>
-                        <?php foreach ($danh_sach_user as $user): ?>
-                            <tr>
-                                <td style="font-weight: bold; color: #718096;">#<?php echo $user['id']; ?></td>
-                                <td>
-                                    <div style="font-weight: 600; color:#2d3748;"><?php echo htmlspecialchars($user['ho_ten']); ?></div>
-                                    <div class="text-muted">📧 Email: <strong><?php echo htmlspecialchars($user['email']); ?></strong></div>
-                                    <div class="text-muted">📞 SĐT: <?php echo htmlspecialchars($user['so_dien_thoai'] ?: 'Chưa cập nhật'); ?></div>
-                                </td>
-                                <td>
-                                    <?php if($user['vai_tro'] == 'admin'): ?>
-                                        <span class="badge-role role-admin">🛡️ Quản trị viên</span>
-                                    <?php else: ?>
-                                        <span class="badge-role role-user">🧑 Khách hàng</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td style="text-align: right;">
-                                    <a href="admin_quan_ly_nguoi_dung.php?sua=<?php echo $user['id']; ?>" class="btn btn-edit">✏️</a>
-                                    <a href="admin_quan_ly_nguoi_dung.php?xoa=<?php echo $user['id']; ?>" class="btn btn-delete" onclick="return confirm('Bạn có chắc chắn muốn xóa thành viên này? Việc này sẽ xóa vĩnh viễn quyền truy cập của họ.');">🗑️</a>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-</body>
-</html>
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin - Người dùng</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial;background:#f4f6f9;margin:0;color:#1e293b}.wrap{max-width:1200px;margin:30px auto;padding:0 15px}.box{background:#fff;padding:22px;border-radius:12px;box-shadow:0 3px 12px #0001;margin-bottom:20px}input,select{width:100%;padding:10px;margin:6px 0 14px;border:1px solid #cbd5e1;border-radius:6px}button,.btn{border:0;border-radius:6px;padding:9px 14px;background:#2563eb;color:#fff;text-decoration:none;cursor:pointer}.danger{background:#dc2626}.back{color:#2563eb;text-decoration:none}table{width:100%;border-collapse:collapse}th,td{padding:11px;border-bottom:1px solid #e2e8f0;text-align:left}th{background:#0f172a;color:#fff}.alert{padding:12px;background:#dcfce7;border-radius:6px;margin-bottom:15px}.role{font-weight:bold}
+</style></head><body><div class="wrap"><p><a class="back" href="index.php">← Dashboard</a></p>
+<div class="box"><h2>👥 Quản lý người dùng</h2><?php if($thong_bao): ?><div class="alert"><?= $thong_bao ?></div><?php endif; ?>
+<form method="post"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf,ENT_QUOTES,'UTF-8') ?>"><input type="hidden" name="action" value="save"><input type="hidden" name="id" value="<?= (int)($user_sua['id']??0) ?>">
+<?php if(!$user_sua): ?><label>Tên đăng nhập</label><input name="ten_dang_nhap" required pattern="[A-Za-z0-9_.-]{3,80}"><?php else: ?><p><b>Tài khoản:</b> <?= htmlspecialchars($user_sua['ten_dang_nhap'],ENT_QUOTES,'UTF-8') ?></p><?php endif; ?>
+<label>Họ tên</label><input name="ho_ten" value="<?= htmlspecialchars($user_sua['ho_ten']??'',ENT_QUOTES,'UTF-8') ?>" required>
+<label>Email</label><input type="email" name="email" value="<?= htmlspecialchars($user_sua['email']??'',ENT_QUOTES,'UTF-8') ?>" required>
+<label>Số điện thoại</label><input name="so_dien_thoai" value="<?= htmlspecialchars($user_sua['so_dien_thoai']??'',ENT_QUOTES,'UTF-8') ?>">
+<label>Vai trò</label><select name="vai_tro"><option value="khach_hang" <?= (($user_sua['vai_tro']??'khach_hang')==='khach_hang')?'selected':'' ?>>Khách hàng</option><option value="admin" <?= (($user_sua['vai_tro']??'')==='admin')?'selected':'' ?>>Admin</option></select>
+<label>Mật khẩu <?= $user_sua?'(để trống nếu giữ nguyên)':'' ?></label><input type="password" name="mat_khau" minlength="8" autocomplete="new-password"><button>Lưu</button> <?php if($user_sua): ?><a class="btn" href="admin_quan_ly_nguoi_dung.php">Hủy</a><?php endif; ?></form></div>
+<div class="box"><h2>Danh sách tài khoản</h2><table><thead><tr><th>ID</th><th>Tài khoản</th><th>Họ tên</th><th>Email</th><th>Vai trò</th><th>Thao tác</th></tr></thead><tbody><?php foreach($danh_sach_user as $u): ?><tr><td><?= (int)$u['id'] ?></td><td><?= htmlspecialchars($u['ten_dang_nhap'],ENT_QUOTES,'UTF-8') ?></td><td><?= htmlspecialchars($u['ho_ten'],ENT_QUOTES,'UTF-8') ?></td><td><?= htmlspecialchars($u['email'],ENT_QUOTES,'UTF-8') ?></td><td class="role"><?= htmlspecialchars($u['vai_tro'],ENT_QUOTES,'UTF-8') ?></td><td><a class="btn" href="?sua=<?= (int)$u['id'] ?>">Sửa</a> <?php if((int)$u['id']!==(int)$_SESSION['user']['id']): ?><form method="post" style="display:inline"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf,ENT_QUOTES,'UTF-8') ?>"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?= (int)$u['id'] ?>"><button class="danger" onclick="return confirm('Xóa tài khoản này?')">Xóa</button></form><?php endif; ?></td></tr><?php endforeach; ?></tbody></table></div></div></body></html>
