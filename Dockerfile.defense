@@ -23,9 +23,12 @@ RUN mkdir -p /etc/apache2/ssl /var/log/apache2 \
 
 COPY apache-vhost.defense.conf /etc/apache2/sites-available/000-default.conf
 COPY apache-ssl.conf /etc/apache2/sites-available/default-ssl.conf
-RUN a2dissite 000-default.conf 2>/dev/null || true \
- && a2ensite 000-default.conf default-ssl.conf
+COPY src/security-lab/defense_bootstrap.php /opt/webbook-defense/defense_bootstrap.php
 
-RUN mkdir -p /var/log/apache2
+RUN a2dissite 000-default.conf 2>/dev/null || true \
+ && a2ensite 000-default.conf default-ssl.conf \
+ && printf '\n<Directory /var/www/html/uploads>\n    Options -Indexes\n    AllowOverride None\n    <FilesMatch "\\.(?:php|phtml|phar|php[0-9]*)$">\n        Require all denied\n    </FilesMatch>\n</Directory>\n' >> /etc/apache2/apache2.conf \
+ && printf '\nphp_admin_value auto_prepend_file /opt/webbook-defense/defense_bootstrap.php\n' > /usr/local/etc/php/conf.d/99-webbook-defense.ini \
+ && mkdir -p /var/log/apache2
 
 EXPOSE 80 443
