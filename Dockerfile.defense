@@ -21,8 +21,11 @@ RUN mkdir -p /etc/apache2/ssl /var/log/apache2 \
     -out /etc/apache2/ssl/apache.crt \
     -subj "/C=VN/ST=DongThap/L=CaoLanh/O=WebBookLab/CN=localhost"
 
-COPY apache-vhost.conf /etc/apache2/sites-available/000-default.conf
+COPY apache-vhost.defense.conf /etc/apache2/sites-available/000-default.conf
 COPY apache-ssl.conf /etc/apache2/sites-available/default-ssl.conf
-RUN a2ensite default-ssl
+RUN a2dissite 000-default.conf 2>/dev/null || true \
+ && a2ensite 000-default.conf default-ssl.conf
+
+RUN mkdir -p /var/log/apache2
 
 EXPOSE 80 443
