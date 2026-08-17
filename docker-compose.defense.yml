@@ -19,7 +19,9 @@ services:
       retries: 20
 
   web_defense:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.defense
     container_name: webbook_defense_web
     environment:
       DB_HOST: db_defense
