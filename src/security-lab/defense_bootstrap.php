@@ -29,6 +29,12 @@ $uri = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $attack = strtolower(getenv('WEBBOOK_SECURITY_MODE') ?: 'defense') === 'attack';
 
+/* Security-lab pages are deliberately vulnerable demonstrations and must never be exposed by Defense. */
+if (!$attack && preg_match('#(?:^|/)security-lab(?:/|$)#', $uri)) {
+    http_response_code(404);
+    exit('Not Found');
+}
+
 /* Every /admin/ PHP endpoint is server-side protected, not merely hidden in UI. */
 if (preg_match('#/admin(?:/|$)#', $uri)) {
     $role = $_SESSION['user']['vai_tro'] ?? '';
