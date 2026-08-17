@@ -17,6 +17,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    networks:
+      - attack_network
 
   web_attack:
     build:
@@ -38,6 +40,13 @@ services:
     depends_on:
       db_attack:
         condition: service_healthy
+    networks:
+      - attack_network
+
+networks:
+  attack_network:
+    name: webbook_attack_network
+    driver: bridge
 
 volumes:
   db_attack_data:
