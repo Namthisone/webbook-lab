@@ -25,8 +25,11 @@ if (!headers_sent()) {
     header("Content-Security-Policy: default-src 'self' https: data:; img-src 'self' https: data:; style-src 'self' https: 'unsafe-inline'; script-src 'self' https: 'unsafe-inline' 'unsafe-eval'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
 }
 
-/* Every /admin/ PHP endpoint is server-side protected, not merely hidden in UI. */
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+$method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+$attack = strtolower(getenv('WEBBOOK_SECURITY_MODE') ?: 'defense') === 'attack';
+
+/* Every /admin/ PHP endpoint is server-side protected, not merely hidden in UI. */
 if (preg_match('#/admin(?:/|$)#', $uri)) {
     $role = $_SESSION['user']['vai_tro'] ?? '';
     if ($role !== 'admin') {
@@ -35,15 +38,22 @@ if (preg_match('#/admin(?:/|$)#', $uri)) {
     }
 }
 
-$method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
-$attack = strtolower(getenv('WEBBOOK_SECURITY_MODE') ?: 'defense') === 'attack';
-
 /* Defense POST requests require a session-bound CSRF token. */
 if (!$attack && $method === 'POST') {
     $token = $_POST['defense_csrf'] ?? '';
     if (!is_string($token) || !hash_equals($_SESSION['defense_csrf'], $token)) {
         http_response_code(403);
         exit('Invalid CSRF token. Please reload the page and try again.');
+    }
+}
+
+/* Defense-in-depth: reject cross-site requests to known state-changing legacy GET endpoints. */
+if (!$attack && $method === 'GET' && ($_SERVER['HTTP_SEC_FETCH_SITE'] ?? '') === 'cross-site') {
+    $sensitiveGet = in_array(basename($uri), ['gio_hang.php', 'thanh_toan.php'], true)
+        || (preg_match('#/admin/#', $uri) && isset($_GET['xoa']));
+    if ($sensitiveGet) {
+        http_response_code(403);
+        exit('Cross-site state-changing request blocked.');
     }
 }
 
@@ -65,7 +75,6 @@ if (!$attack) {
     });
 }
 
-/* Reject obviously oversized request bodies before application processing. */
 if ($method === 'POST') {
     $max = 10 * 1024 * 1024;
     $length = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
