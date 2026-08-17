@@ -55,7 +55,7 @@ if (!$attack) {
             '/<form\b([^>]*)>/i',
             static function (array $m) use ($token): string {
                 $tag = $m[0];
-                if (preg_match('/method\s*=\s*["\']post["\']/i', $tag) && stripos($buffer, 'name="defense_csrf"') === false) {
+                if (preg_match('/method\s*=\s*["\']post["\']/i', $tag)) {
                     return $tag . '<input type="hidden" name="defense_csrf" value="' . $token . '">';
                 }
                 return $tag;
